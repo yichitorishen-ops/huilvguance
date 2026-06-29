@@ -2,14 +2,14 @@ name: Collect Data and Deploy Pages
 
 on:
   schedule:
-    # Beijing 00:00, Tuesday-Saturday.
-    - cron: "0 16 * * 1-5"
-    # Beijing 06:00, Monday-Friday.
-    - cron: "0 22 * * 0-4"
-    # Beijing 13:00, Monday-Friday.
-    - cron: "0 5 * * 1-5"
-    # Beijing 18:00, Monday-Friday.
-    - cron: "0 10 * * 1-5"
+    # Beijing 00:17, Tuesday-Saturday; records the 00:00 slot.
+    - cron: "17 16 * * 1-5"
+    # Beijing 06:17, Monday-Friday; records the 06:00 slot.
+    - cron: "17 22 * * 0-4"
+    # Beijing 13:17, Monday-Friday; records the 13:00 slot.
+    - cron: "17 5 * * 1-5"
+    # Beijing 18:17, Monday-Friday; records the 18:00 slot.
+    - cron: "17 10 * * 1-5"
   workflow_dispatch:
     inputs:
       collect:
@@ -71,10 +71,10 @@ jobs:
           if [[ "${{ github.event_name }}" == "schedule" ]]; then
             run_collection="true"
             case "${{ github.event.schedule }}" in
-              "0 16 * * 1-5") scheduled_hour="0" ;;
-              "0 22 * * 0-4") scheduled_hour="6" ;;
-              "0 5 * * 1-5") scheduled_hour="13" ;;
-              "0 10 * * 1-5") scheduled_hour="18" ;;
+              "17 16 * * 1-5") scheduled_hour="0" ;;
+              "17 22 * * 0-4") scheduled_hour="6" ;;
+              "17 5 * * 1-5") scheduled_hour="13" ;;
+              "17 10 * * 1-5") scheduled_hour="18" ;;
             esac
           elif [[ "${{ inputs.collect }}" == "true" ]]; then
             run_collection="true"

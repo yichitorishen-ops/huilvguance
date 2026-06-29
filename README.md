@@ -12,10 +12,10 @@ The workflow in `.github/workflows/pages.yml` runs on GitHub Actions and:
 4. Commits the updated `data/sqlite.db` history back to the repository.
 5. Builds `dist/` and deploys it to GitHub Pages.
 
-Scheduled collection follows the original Beijing-time slots:
+Scheduled collection runs a few minutes after the original Beijing-time slots and records the original slot labels:
 
-- Monday-Friday: 06:00, 13:00, 18:00
-- Tuesday-Saturday: 00:00
+- Monday-Friday: runs at 06:17, 13:17, 18:17; records 06:00, 13:00, 18:00
+- Tuesday-Saturday: runs at 00:17; records 00:00
 - Sunday: skipped
 - Monday 00:00: skipped
 
