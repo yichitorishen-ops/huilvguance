@@ -1,0 +1,11 @@
+.idea
+.venv
+.runtime
+__pycache__
+logs
+dist
+gh-pages-dist
+*.json
+*.db
+data/*
+!data/sqlite.db
