@@ -70,6 +70,32 @@ def compute_combo_lines(a, b, c, na, nb, nc):
 
     return [line1, line2, line3]
 
+
+def _time_rank(time_point: str):
+    return {"06:00": 6, "13:00": 13, "18:00": 18, "00:00": 24}.get(time_point, -1)
+
+
+async def _latest_prices_on_or_before(conn, table_name: str, symbols: list, date_str: str):
+    if not symbols:
+        return {}
+
+    placeholders = ",".join(["?" for _ in symbols])
+    sql = f"""
+        SELECT date_str, time_point, symbol, price
+        FROM {table_name}
+        WHERE symbol IN ({placeholders}) AND date_str <= ?
+    """
+    cursor = await conn.execute(sql, [*symbols, date_str])
+    rows = await cursor.fetchall()
+
+    latest = {}
+    for row in rows:
+        symbol = row["symbol"]
+        sort_key = (row["date_str"], _time_rank(row["time_point"]))
+        if symbol not in latest or sort_key > latest[symbol][0]:
+            latest[symbol] = (sort_key, row["price"])
+    return {symbol: price for symbol, (_, price) in latest.items()}
+
 async def _query_weekly_data(friday_date_str: str, table_name: str, symbol_map: dict):
     timeline = get_week_timeline(friday_date_str)
     date_strs = list(set([t[0] for t in timeline]))
@@ -106,6 +132,8 @@ async def _query_weekly_data(friday_date_str: str, table_name: str, symbol_map: 
     ]
     
     baseline_thursday_str = (baseline_dt - timedelta(days=1)).strftime("%Y-%m-%d")
+    async with get_conn() as conn:
+        prior_prices = await _latest_prices_on_or_before(conn, table_name, symbols, baseline_thursday_str)
 
     for symbol in symbols:
         name = symbol_map.get(symbol, symbol)
@@ -118,6 +146,8 @@ async def _query_weekly_data(friday_date_str: str, table_name: str, symbol_map: 
         }
         
         last_valid_price = lookup.get((symbol, baseline_thursday_str, "00:00"))
+        if last_valid_price is None:
+            last_valid_price = prior_prices.get(symbol)
         
         for i in range(5):
             current_day_str = days_dates[i]
@@ -160,6 +190,8 @@ async def _query_weekly_data(friday_date_str: str, table_name: str, symbol_map: 
             else:
                 prev_day_str = days_dates[i-1]
                 yest_24_price = lookup.get((symbol, prev_day_str, "00:00"))
+            if yest_24_price is None:
+                yest_24_price = prior_prices.get(symbol)
                 
             if today_24_price is not None:
                 day_data["daily_price"] = today_24_price
@@ -222,10 +254,15 @@ async def query_weekly_combo(friday_date_str: str):
     baseline_thursday_str = (baseline_dt - timedelta(days=1)).strftime("%Y-%m-%d")
     weekdays_labels = ["周五", "周一", "周二", "周三", "周四"]
     times = ["06:00", "13:00", "18:00", "00:00"]
+    symbols = sorted({meta["symbol"] for combo in compose_list for meta in combo[:3]})
+    async with get_conn() as conn:
+        prior_prices = await _latest_prices_on_or_before(conn, "mcn_quotes", symbols, baseline_thursday_str)
 
     def get_symbol_amps(symbol):
         amps = {"points": {}, "daily": {}, "weekly": ""}
         last_valid_price = lookup.get((symbol, baseline_thursday_str, "00:00"))
+        if last_valid_price is None:
+            last_valid_price = prior_prices.get(symbol)
         for i, day_str in enumerate(days_dates):
             for t in times:
                 curr_price = lookup.get((symbol, day_str, t))
@@ -238,6 +275,8 @@ async def query_weekly_combo(friday_date_str: str):
             
             today_24 = lookup.get((symbol, day_str, "00:00"))
             yest_24 = lookup.get((symbol, baseline_thursday_str if i==0 else days_dates[i-1], "00:00"))
+            if yest_24 is None:
+                yest_24 = prior_prices.get(symbol)
             daily_amp = ""
             if today_24 is not None and yest_24 is not None and yest_24 != 0:
                 daily_amp = round((today_24 - yest_24) / yest_24, 6)
@@ -315,10 +354,16 @@ async def query_weekly_bond_combo(friday_date_str: str):
     baseline_thursday_str = (baseline_dt - timedelta(days=1)).strftime("%Y-%m-%d")
     weekdays_labels = ["周五", "周一", "周二", "周三", "周四"]
     times = ["06:00", "13:00", "18:00", "00:00"]
+    from config import bond_map
+    symbols = list(bond_map.keys())
+    async with get_conn() as conn:
+        prior_prices = await _latest_prices_on_or_before(conn, "wallstreet_bonds", symbols, baseline_thursday_str)
     
     def get_symbol_data(symbol):
         ret = {"prices": {}, "amps": {}, "diffs": {}, "daily_prices": {}, "daily_amps": {}, "daily_diffs": {}, "weekly_price": None, "weekly_amp": None, "weekly_diff": None}
         last_price = lookup.get((symbol, baseline_thursday_str, "00:00"))
+        if last_price is None:
+            last_price = prior_prices.get(symbol)
         for i, day_str in enumerate(days_dates):
             for t in times:
                 curr_price = lookup.get((symbol, day_str, t))
@@ -335,6 +380,8 @@ async def query_weekly_bond_combo(friday_date_str: str):
                 
             today_24 = lookup.get((symbol, day_str, "00:00"))
             yest_24 = lookup.get((symbol, baseline_thursday_str if i==0 else days_dates[i-1], "00:00"))
+            if yest_24 is None:
+                yest_24 = prior_prices.get(symbol)
             d_amp = None
             d_diff = None
             if today_24 is not None and yest_24 is not None and yest_24 != 0:
@@ -361,6 +408,10 @@ async def query_weekly_bond_combo(friday_date_str: str):
         last_p = None
         pa_0 = lookup.get((sym_a, baseline_thursday_str, "00:00"))
         pb_0 = lookup.get((sym_b, baseline_thursday_str, "00:00"))
+        if pa_0 is None:
+            pa_0 = prior_prices.get(sym_a)
+        if pb_0 is None:
+            pb_0 = prior_prices.get(sym_b)
         if pa_0 is not None and pb_0 is not None:
             last_p = pa_0 - pb_0
             
@@ -384,6 +435,10 @@ async def query_weekly_bond_combo(friday_date_str: str):
             pb_d = data_b["daily_prices"][i]
             pa_yd = lookup.get((sym_a, baseline_thursday_str if i==0 else days_dates[i-1], "00:00"))
             pb_yd = lookup.get((sym_b, baseline_thursday_str if i==0 else days_dates[i-1], "00:00"))
+            if pa_yd is None:
+                pa_yd = prior_prices.get(sym_a)
+            if pb_yd is None:
+                pb_yd = prior_prices.get(sym_b)
             d_last_p = None
             if pa_yd is not None and pb_yd is not None:
                 d_last_p = pa_yd - pb_yd
