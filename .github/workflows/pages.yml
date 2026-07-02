@@ -67,15 +67,11 @@ jobs:
         run: |
           run_collection="false"
           scheduled_hour=""
+          schedule_cron=""
 
           if [[ "${{ github.event_name }}" == "schedule" ]]; then
             run_collection="true"
-            case "${{ github.event.schedule }}" in
-              "17 16 * * 1-5") scheduled_hour="0" ;;
-              "17 22 * * 0-4") scheduled_hour="6" ;;
-              "17 5 * * 1-5") scheduled_hour="13" ;;
-              "17 10 * * 1-5") scheduled_hour="18" ;;
-            esac
+            schedule_cron="${{ github.event.schedule }}"
           elif [[ "${{ inputs.collect }}" == "true" ]]; then
             run_collection="true"
             scheduled_hour="${{ inputs.scheduled_hour }}"
@@ -83,10 +79,17 @@ jobs:
 
           echo "RUN_COLLECTION=$run_collection" >> "$GITHUB_ENV"
           echo "SCHEDULED_HOUR=$scheduled_hour" >> "$GITHUB_ENV"
+          echo "SCHEDULE_CRON=$schedule_cron" >> "$GITHUB_ENV"
 
       - name: Collect data
         if: env.RUN_COLLECTION == 'true'
-        run: python scripts/collect_once.py --scheduled-hour "$SCHEDULED_HOUR"
+        shell: bash
+        run: |
+          if [[ -n "$SCHEDULE_CRON" ]]; then
+            python scripts/collect_once.py --schedule-cron "$SCHEDULE_CRON"
+          else
+            python scripts/collect_once.py --scheduled-hour "$SCHEDULED_HOUR"
+          fi
 
       - name: Build static site
         run: python scripts/build_static_site.py --output dist

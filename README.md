@@ -21,6 +21,8 @@ Scheduled collection runs a few minutes after the original Beijing-time slots an
 
 Manual runs default to build-and-deploy only. To collect manually, run the workflow with `collect=true` and choose one scheduled Beijing hour.
 
+Scheduled runs use the original cron time to decide the data slot, not the delayed runner start time. If GitHub starts a scheduled run more than two hours late, the collection step skips writing data to avoid storing a stale price in the wrong slot.
+
 ## Local commands
 
 ```powershell
