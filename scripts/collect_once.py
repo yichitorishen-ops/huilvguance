@@ -22,10 +22,19 @@ async def main():
         print(f"skip=stale_schedule scheduled_at={scheduled_at.isoformat()}")
         return
 
-    result = await collect_once(scheduled_hour=args.scheduled_hour, scheduled_at=scheduled_at)
+    result = await collect_once(
+        scheduled_hour=args.scheduled_hour,
+        scheduled_at=scheduled_at,
+        skip_existing=scheduled_at is not None,
+    )
     window = result.window
     if not window.should_collect:
         print(f"skip={window.skip_reason}")
+        return
+    if result.skip_reason:
+        print(f"skip={result.skip_reason}")
+        print(f"record_date={window.record_date:%Y-%m-%d}")
+        print(f"time_point={window.time_point}")
         return
 
     print(f"record_date={window.record_date:%Y-%m-%d}")

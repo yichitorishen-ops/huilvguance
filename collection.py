@@ -3,7 +3,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from api import Api
 from date_utils import APP_TIMEZONE
-from db import init_db, replace_mcn_quotes, replace_wallstreet_bonds
+from db import get_conn, init_db, replace_mcn_quotes, replace_wallstreet_bonds
 
 
 @dataclass(frozen=True)
@@ -19,6 +19,7 @@ class CollectionResult:
     window: CollectionWindow
     quotes_count: int = 0
     bonds_count: int = 0
+    skip_reason: str | None = None
 
 
 def _parse_cron_field(field: str, minimum: int, maximum: int):
@@ -69,6 +70,24 @@ def is_schedule_stale(scheduled_at: datetime, now: datetime | None = None, max_d
     return current - scheduled_at > timedelta(minutes=max_delay_minutes)
 
 
+async def has_complete_slot(date_str: str, time_point: str) -> bool:
+    async with get_conn() as conn:
+        quote_row = await (
+            await conn.execute(
+                "SELECT COUNT(*) FROM mcn_quotes WHERE date_str = ? AND time_point = ?",
+                (date_str, time_point),
+            )
+        ).fetchone()
+        bond_row = await (
+            await conn.execute(
+                "SELECT COUNT(*) FROM wallstreet_bonds WHERE date_str = ? AND time_point = ?",
+                (date_str, time_point),
+            )
+        ).fetchone()
+
+    return quote_row[0] > 0 and bond_row[0] > 0
+
+
 def collection_window(
     now: datetime | None = None,
     scheduled_hour: int | None = None,
@@ -98,15 +117,18 @@ async def collect_once(
     now: datetime | None = None,
     scheduled_hour: int | None = None,
     scheduled_at: datetime | None = None,
+    skip_existing: bool = False,
 ) -> CollectionResult:
     window = collection_window(now=now, scheduled_hour=scheduled_hour, scheduled_at=scheduled_at)
     if not window.should_collect:
         return CollectionResult(window=window)
 
     await init_db()
-    api = Api()
     date_str = window.record_date.strftime("%Y-%m-%d")
+    if skip_existing and await has_complete_slot(date_str, window.time_point):
+        return CollectionResult(window=window, skip_reason="existing_slot")
 
+    api = Api()
     quotes = await api.mcn_finance_quotes()
     await replace_mcn_quotes(quotes, date_str, window.time_point)
 

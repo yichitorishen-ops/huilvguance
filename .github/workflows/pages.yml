@@ -4,12 +4,20 @@ on:
   schedule:
     # Beijing 00:17, Tuesday-Saturday; records the 00:00 slot.
     - cron: "17 16 * * 1-5"
+    # Beijing 00:47 retry, Tuesday-Saturday; records the 00:00 slot.
+    - cron: "47 16 * * 1-5"
     # Beijing 06:17, Monday-Friday; records the 06:00 slot.
     - cron: "17 22 * * 0-4"
+    # Beijing 06:47 retry, Monday-Friday; records the 06:00 slot.
+    - cron: "47 22 * * 0-4"
     # Beijing 13:17, Monday-Friday; records the 13:00 slot.
     - cron: "17 5 * * 1-5"
+    # Beijing 13:47 retry, Monday-Friday; records the 13:00 slot.
+    - cron: "47 5 * * 1-5"
     # Beijing 18:17, Monday-Friday; records the 18:00 slot.
     - cron: "17 10 * * 1-5"
+    # Beijing 18:47 retry, Monday-Friday; records the 18:00 slot.
+    - cron: "47 10 * * 1-5"
   workflow_dispatch:
     inputs:
       collect:

@@ -1,7 +1,11 @@
 import unittest
 from datetime import date, datetime, timezone
+import os
+import tempfile
 
-from collection import collection_window, is_schedule_stale, latest_cron_datetime
+import aiosqlite
+import db
+from collection import collection_window, has_complete_slot, is_schedule_stale, latest_cron_datetime
 
 
 class CollectionWindowTest(unittest.TestCase):
@@ -66,6 +70,35 @@ class CollectionWindowTest(unittest.TestCase):
 
         self.assertFalse(window.should_collect)
         self.assertEqual(window.skip_reason, "sunday")
+
+
+class SlotDataTest(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.old_db_path = db.DB_PATH
+        db.DB_PATH = os.path.join(self.tmp.name, "sqlite.db")
+        await db.init_db()
+
+    async def asyncTearDown(self):
+        db.DB_PATH = self.old_db_path
+        self.tmp.cleanup()
+
+    async def insert_price(self, table):
+        async with aiosqlite.connect(db.DB_PATH) as conn:
+            await conn.execute(
+                f"INSERT INTO {table} (date_str, time_point, symbol, price) VALUES (?, ?, ?, ?)",
+                ("2026-07-02", "13:00", "USD/CNY", 7.0),
+            )
+            await conn.commit()
+
+    async def test_has_complete_slot_requires_quotes_and_bonds(self):
+        await self.insert_price("mcn_quotes")
+
+        self.assertFalse(await has_complete_slot("2026-07-02", "13:00"))
+
+        await self.insert_price("wallstreet_bonds")
+
+        self.assertTrue(await has_complete_slot("2026-07-02", "13:00"))
 
 
 if __name__ == "__main__":

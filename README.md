@@ -14,14 +14,16 @@ The workflow in `.github/workflows/pages.yml` runs on GitHub Actions and:
 
 Scheduled collection runs a few minutes after the original Beijing-time slots and records the original slot labels:
 
-- Monday-Friday: runs at 06:17, 13:17, 18:17; records 06:00, 13:00, 18:00
-- Tuesday-Saturday: runs at 00:17; records 00:00
+- Monday-Friday: runs at 06:17/06:47, 13:17/13:47, 18:17/18:47; records 06:00, 13:00, 18:00
+- Tuesday-Saturday: runs at 00:17/00:47; records 00:00
 - Sunday: skipped
 - Monday 00:00: skipped
 
 Manual runs default to build-and-deploy only. To collect manually, run the workflow with `collect=true` and choose one scheduled Beijing hour.
 
 Scheduled runs use the original cron time to decide the data slot, not the delayed runner start time. If GitHub starts a scheduled run more than two hours late, the collection step skips writing data to avoid storing a stale price in the wrong slot.
+
+Retry runs skip collection when the target slot already has both quote and bond data, so they do not overwrite an earlier successful capture.
 
 ## Local commands
 
