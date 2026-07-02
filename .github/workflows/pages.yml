@@ -2,22 +2,36 @@ name: Collect Data and Deploy Pages
 
 on:
   schedule:
-    # Beijing 00:17, Tuesday-Saturday; records the 00:00 slot.
+    # Beijing 00:07-00:57 retries, Tuesday-Saturday; records the 00:00 slot.
+    - cron: "7 16 * * 1-5"
     - cron: "17 16 * * 1-5"
-    # Beijing 00:47 retry, Tuesday-Saturday; records the 00:00 slot.
+    - cron: "27 16 * * 1-5"
+    - cron: "37 16 * * 1-5"
     - cron: "47 16 * * 1-5"
-    # Beijing 06:17, Monday-Friday; records the 06:00 slot.
+    - cron: "57 16 * * 1-5"
+    # Beijing 06:07-06:57 retries, Monday-Friday; records the 06:00 slot.
+    - cron: "7 22 * * 0-4"
     - cron: "17 22 * * 0-4"
-    # Beijing 06:47 retry, Monday-Friday; records the 06:00 slot.
+    - cron: "27 22 * * 0-4"
+    - cron: "37 22 * * 0-4"
     - cron: "47 22 * * 0-4"
-    # Beijing 13:17, Monday-Friday; records the 13:00 slot.
+    - cron: "57 22 * * 0-4"
+    # Beijing 13:07-13:57 retries, Monday-Friday; records the 13:00 slot.
+    - cron: "7 5 * * 1-5"
     - cron: "17 5 * * 1-5"
-    # Beijing 13:47 retry, Monday-Friday; records the 13:00 slot.
+    - cron: "27 5 * * 1-5"
+    - cron: "37 5 * * 1-5"
     - cron: "47 5 * * 1-5"
-    # Beijing 18:17, Monday-Friday; records the 18:00 slot.
+    - cron: "57 5 * * 1-5"
+    # Beijing 18:07-18:57 retries, Monday-Friday; records the 18:00 slot.
+    - cron: "7 10 * * 1-5"
     - cron: "17 10 * * 1-5"
-    # Beijing 18:47 retry, Monday-Friday; records the 18:00 slot.
+    - cron: "27 10 * * 1-5"
+    - cron: "37 10 * * 1-5"
     - cron: "47 10 * * 1-5"
+    - cron: "57 10 * * 1-5"
+    # Hourly backstop; fills recently missed slots without overwriting complete slots.
+    - cron: "8 * * * *"
   workflow_dispatch:
     inputs:
       collect:
@@ -74,18 +88,24 @@ jobs:
         shell: bash
         run: |
           run_collection="false"
+          run_catch_up="false"
           scheduled_hour=""
           schedule_cron=""
 
           if [[ "${{ github.event_name }}" == "schedule" ]]; then
-            run_collection="true"
-            schedule_cron="${{ github.event.schedule }}"
+            if [[ "${{ github.event.schedule }}" == "8 * * * *" ]]; then
+              run_catch_up="true"
+            else
+              run_collection="true"
+              schedule_cron="${{ github.event.schedule }}"
+            fi
           elif [[ "${{ inputs.collect }}" == "true" ]]; then
             run_collection="true"
             scheduled_hour="${{ inputs.scheduled_hour }}"
           fi
 
           echo "RUN_COLLECTION=$run_collection" >> "$GITHUB_ENV"
+          echo "RUN_CATCH_UP=$run_catch_up" >> "$GITHUB_ENV"
           echo "SCHEDULED_HOUR=$scheduled_hour" >> "$GITHUB_ENV"
           echo "SCHEDULE_CRON=$schedule_cron" >> "$GITHUB_ENV"
 
@@ -99,11 +119,15 @@ jobs:
             python scripts/collect_once.py --scheduled-hour "$SCHEDULED_HOUR"
           fi
 
+      - name: Catch up missing data
+        if: env.RUN_CATCH_UP == 'true'
+        run: python scripts/collect_once.py --catch-up --max-delay-minutes 120
+
       - name: Build static site
         run: python scripts/build_static_site.py --output dist
 
       - name: Commit data history
-        if: env.RUN_COLLECTION == 'true'
+        if: env.RUN_COLLECTION == 'true' || env.RUN_CATCH_UP == 'true'
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
