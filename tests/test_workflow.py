@@ -1,10 +1,15 @@
 from pathlib import Path
-from collections import Counter
 import re
 import unittest
 
 
 BACKSTOP_CRON = "8,18,28,38,48,58 * * * *"
+CAPTURE_CRONS = {
+    "7,17,27,37,47,57 14,15,16,17 * * 1-5",
+    "7,17,27,37,47,57 20,21,22,23 * * 0-4",
+    "7,17,27,37,47,57 3,4,5,6 * * 1-5",
+    "7,17,27,37,47,57 8,9,10,11 * * 1-5",
+}
 
 
 class WorkflowScheduleTest(unittest.TestCase):
@@ -15,13 +20,13 @@ class WorkflowScheduleTest(unittest.TestCase):
         self.assertGreater(len(crons), 0)
         self.assertTrue(all(not cron.startswith("0 ") for cron in crons), crons)
 
-    def test_each_data_slot_has_retry_schedule(self):
+    def test_each_data_slot_has_early_capture_schedule(self):
         workflow = Path(".github/workflows/pages.yml").read_text(encoding="utf-8")
         crons = re.findall(r'cron: "([^"]+)"', workflow)
         slot_crons = [cron for cron in crons if cron != BACKSTOP_CRON]
-        hours = [cron.split()[1] for cron in slot_crons]
 
-        self.assertEqual(Counter(hours), Counter({"16": 6, "22": 6, "5": 6, "10": 6}))
+        self.assertEqual(set(slot_crons), CAPTURE_CRONS)
+        self.assertEqual(len(slot_crons), 4)
 
     def test_hourly_backstop_schedule_exists(self):
         workflow = Path(".github/workflows/pages.yml").read_text(encoding="utf-8")

@@ -11,6 +11,7 @@ from db import get_conn, init_db, replace_mcn_quotes, replace_wallstreet_bonds
 SCHEDULED_HOURS = (0, 6, 13, 18)
 DEFAULT_COLLECTION_MINUTE = 17
 COLLECTION_RETRY_MINUTES = (7, 17, 27, 37, 47, 57)
+CAPTURE_ADVANCE_MINUTES = 120
 
 
 @dataclass(frozen=True)
@@ -87,17 +88,66 @@ def latest_cron_datetime(cron_expression: str, now: datetime | None = None) -> d
     raise ValueError(f"No recent schedule matched cron expression: {cron_expression}")
 
 
+def _as_app_datetime(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=APP_TIMEZONE)
+    return value.astimezone(APP_TIMEZONE)
+
+
+def _target_at_for_capture_time(capture_at: datetime, max_delay_minutes: int = 120) -> datetime | None:
+    local_capture_at = _as_app_datetime(capture_at)
+    for day_offset in range(-1, 2):
+        target_date = local_capture_at.date() + timedelta(days=day_offset)
+        for hour in SCHEDULED_HOURS:
+            target_at = datetime.combine(target_date, time(hour), tzinfo=APP_TIMEZONE)
+            window_start = target_at - timedelta(minutes=CAPTURE_ADVANCE_MINUTES)
+            window_end = target_at + timedelta(minutes=max_delay_minutes)
+            if window_start <= local_capture_at <= window_end:
+                return target_at
+
+    return None
+
+
+def _collection_window_for_target(target_at: datetime) -> CollectionWindow:
+    target_at = _as_app_datetime(target_at).replace(minute=0, second=0, microsecond=0)
+    hour = target_at.hour
+    weekday = target_at.weekday()
+
+    if weekday == 5 and hour != 0:
+        return CollectionWindow(False, None, None, "saturday_daytime")
+    if weekday == 6:
+        return CollectionWindow(False, None, None, "sunday")
+    if weekday == 0 and hour == 0:
+        return CollectionWindow(False, None, None, "monday_00")
+
+    record_date = (target_at - timedelta(hours=1)).date()
+    return CollectionWindow(True, record_date, f"{hour:02d}:00")
+
+
+def _latest_retry_at(
+    window_start: datetime,
+    window_end: datetime,
+    now: datetime,
+    collection_minutes: tuple[int, ...],
+) -> datetime | None:
+    latest = min(now, window_end).replace(second=0, microsecond=0)
+    candidate = latest
+    while candidate >= window_start:
+        if candidate.minute in collection_minutes:
+            return candidate
+        candidate -= timedelta(minutes=1)
+
+    return None
+
+
 def is_schedule_stale(scheduled_at: datetime, now: datetime | None = None, max_delay_minutes: int = 120) -> bool:
     current = now or datetime.now(timezone.utc)
-    if current.tzinfo is None:
-        current = current.replace(tzinfo=timezone.utc)
-    current = current.astimezone(timezone.utc)
+    current = _as_app_datetime(current)
+    target_at = _target_at_for_capture_time(scheduled_at, max_delay_minutes=max_delay_minutes)
+    if target_at is None:
+        return True
 
-    if scheduled_at.tzinfo is None:
-        scheduled_at = scheduled_at.replace(tzinfo=timezone.utc)
-    scheduled_at = scheduled_at.astimezone(timezone.utc)
-
-    return current - scheduled_at > timedelta(minutes=max_delay_minutes)
+    return current > target_at + timedelta(minutes=max_delay_minutes)
 
 
 async def has_complete_slot(date_str: str, time_point: str) -> bool:
@@ -124,23 +174,17 @@ def collection_window(
     scheduled_at: datetime | None = None,
 ) -> CollectionWindow:
     local_now = scheduled_at or now or datetime.now(APP_TIMEZONE)
-    if local_now.tzinfo is None:
-        local_now = local_now.replace(tzinfo=APP_TIMEZONE)
-    local_now = local_now.astimezone(APP_TIMEZONE)
+    local_now = _as_app_datetime(local_now)
 
-    hour = local_now.hour if scheduled_hour is None else scheduled_hour
-    scheduled_at = local_now.replace(hour=hour, minute=0, second=0, microsecond=0)
-    weekday = scheduled_at.weekday()
+    if scheduled_hour is not None:
+        target_at = local_now.replace(hour=scheduled_hour, minute=0, second=0, microsecond=0)
+        return _collection_window_for_target(target_at)
 
-    if weekday == 5 and hour != 0:
-        return CollectionWindow(False, None, None, "saturday_daytime")
-    if weekday == 6:
-        return CollectionWindow(False, None, None, "sunday")
-    if weekday == 0 and hour == 0:
-        return CollectionWindow(False, None, None, "monday_00")
+    target_at = _target_at_for_capture_time(local_now)
+    if target_at is None:
+        return CollectionWindow(False, None, None, "outside_capture_window")
 
-    record_date = (scheduled_at - timedelta(hours=1)).date()
-    return CollectionWindow(True, record_date, f"{hour:02d}:00")
+    return _collection_window_for_target(target_at)
 
 
 def recent_collection_windows(
@@ -153,30 +197,29 @@ def recent_collection_windows(
         local_now = local_now.replace(tzinfo=APP_TIMEZONE)
     local_now = local_now.astimezone(APP_TIMEZONE)
 
-    earliest = local_now - timedelta(minutes=max_delay_minutes)
     collection_minutes = (collection_minute,) if collection_minute is not None else COLLECTION_RETRY_MINUTES
     candidates_by_slot = {}
-    days = (local_now.date() - earliest.date()).days
-    for offset in range(days + 1):
-        candidate_date = earliest.date() + timedelta(days=offset)
+    for offset in range(-1, 2):
+        candidate_date = local_now.date() + timedelta(days=offset)
         for hour in SCHEDULED_HOURS:
-            for minute in collection_minutes:
-                scheduled_at = datetime.combine(
-                    candidate_date,
-                    time(hour, minute),
-                    tzinfo=APP_TIMEZONE,
-                )
-                if not earliest <= scheduled_at <= local_now:
-                    continue
+            target_at = datetime.combine(candidate_date, time(hour), tzinfo=APP_TIMEZONE)
+            window_start = target_at - timedelta(minutes=CAPTURE_ADVANCE_MINUTES)
+            window_end = target_at + timedelta(minutes=max_delay_minutes)
+            if not window_start <= local_now <= window_end:
+                continue
 
-                window = collection_window(scheduled_at=scheduled_at)
-                if not window.should_collect:
-                    continue
+            scheduled_at = _latest_retry_at(window_start, window_end, local_now, collection_minutes)
+            if scheduled_at is None:
+                continue
 
-                slot_key = (window.record_date, window.time_point)
-                current = candidates_by_slot.get(slot_key)
-                if current is None or scheduled_at > current.scheduled_at:
-                    candidates_by_slot[slot_key] = ScheduledCollection(scheduled_at, window)
+            window = _collection_window_for_target(target_at)
+            if not window.should_collect:
+                continue
+
+            slot_key = (window.record_date, window.time_point)
+            current = candidates_by_slot.get(slot_key)
+            if current is None or scheduled_at > current.scheduled_at:
+                candidates_by_slot[slot_key] = ScheduledCollection(scheduled_at, window)
 
     return sorted(candidates_by_slot.values(), key=lambda candidate: candidate.scheduled_at)
 

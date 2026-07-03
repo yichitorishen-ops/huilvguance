@@ -33,6 +33,15 @@ class CollectionWindowTest(unittest.TestCase):
         self.assertEqual(window.record_date, date(2026, 7, 1))
         self.assertEqual(window.time_point, "18:00")
 
+    def test_scheduled_at_two_hours_before_target_maps_to_target_slot(self):
+        original_schedule = datetime(2026, 7, 2, 20, 7, tzinfo=timezone.utc)
+
+        window = collection_window(scheduled_at=original_schedule)
+
+        self.assertTrue(window.should_collect)
+        self.assertEqual(window.record_date, date(2026, 7, 3))
+        self.assertEqual(window.time_point, "06:00")
+
     def test_latest_cron_datetime_finds_original_schedule_before_delayed_runtime(self):
         delayed_runtime = datetime(2026, 7, 1, 21, 13, tzinfo=timezone.utc)
 
@@ -51,6 +60,18 @@ class CollectionWindowTest(unittest.TestCase):
         delayed_runtime = datetime(2026, 7, 1, 17, 32, tzinfo=timezone.utc)
 
         self.assertFalse(is_schedule_stale(scheduled_at, now=delayed_runtime))
+
+    def test_schedule_started_two_hours_early_is_not_stale_until_target_plus_two(self):
+        scheduled_at = datetime(2026, 7, 2, 20, 7, tzinfo=timezone.utc)
+        delayed_runtime = datetime(2026, 7, 2, 23, 59, tzinfo=timezone.utc)
+
+        self.assertFalse(is_schedule_stale(scheduled_at, now=delayed_runtime))
+
+    def test_schedule_started_two_hours_early_is_stale_after_target_plus_two(self):
+        scheduled_at = datetime(2026, 7, 2, 20, 7, tzinfo=timezone.utc)
+        delayed_runtime = datetime(2026, 7, 3, 0, 1, tzinfo=timezone.utc)
+
+        self.assertTrue(is_schedule_stale(scheduled_at, now=delayed_runtime))
 
     def test_monday_zero_is_skipped(self):
         window = collection_window(now=datetime(2026, 6, 28, 16, 5, tzinfo=timezone.utc), scheduled_hour=0)
@@ -78,11 +99,22 @@ class CollectionWindowTest(unittest.TestCase):
         self.assertEqual(window.skip_reason, "sunday")
 
     def test_recent_collection_windows_waits_until_capture_minute(self):
-        now = datetime(2026, 7, 2, 10, 6, tzinfo=timezone.utc)
+        now = datetime(2026, 7, 2, 8, 6, tzinfo=timezone.utc)
 
         windows = recent_collection_windows(now=now)
 
         self.assertEqual(windows, [])
+
+    def test_recent_collection_windows_includes_future_target_after_window_opens(self):
+        now = datetime(2026, 7, 2, 20, 8, tzinfo=timezone.utc)
+
+        windows = recent_collection_windows(now=now)
+
+        self.assertEqual(len(windows), 1)
+        self.assertEqual(windows[0].scheduled_at.hour, 4)
+        self.assertEqual(windows[0].scheduled_at.minute, 7)
+        self.assertEqual(windows[0].window.record_date, date(2026, 7, 3))
+        self.assertEqual(windows[0].window.time_point, "06:00")
 
     def test_recent_collection_windows_includes_missing_18_slot_for_backstop(self):
         now = datetime(2026, 7, 2, 11, 8, tzinfo=timezone.utc)
@@ -94,12 +126,12 @@ class CollectionWindowTest(unittest.TestCase):
         self.assertEqual(windows[0].window.time_point, "18:00")
 
     def test_recent_collection_windows_uses_late_retry_minutes_for_backstop(self):
-        now = datetime(2026, 7, 3, 0, 32, tzinfo=timezone.utc)
+        now = datetime(2026, 7, 2, 23, 59, tzinfo=timezone.utc)
 
         windows = recent_collection_windows(now=now)
 
         self.assertEqual(len(windows), 1)
-        self.assertEqual(windows[0].scheduled_at.hour, 6)
+        self.assertEqual(windows[0].scheduled_at.hour, 7)
         self.assertEqual(windows[0].scheduled_at.minute, 57)
         self.assertEqual(windows[0].window.record_date, date(2026, 7, 3))
         self.assertEqual(windows[0].window.time_point, "06:00")
