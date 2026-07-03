@@ -124,6 +124,29 @@ def _collection_window_for_target(target_at: datetime) -> CollectionWindow:
     return CollectionWindow(True, record_date, f"{hour:02d}:00")
 
 
+def _target_at_for_scheduled_hour(
+    local_now: datetime,
+    scheduled_hour: int,
+    max_delay_minutes: int = 120,
+) -> datetime:
+    local_now = _as_app_datetime(local_now)
+    best = None
+    for day_offset in range(-1, 2):
+        target_date = local_now.date() + timedelta(days=day_offset)
+        target_at = datetime.combine(target_date, time(scheduled_hour), tzinfo=APP_TIMEZONE)
+        window_start = target_at - timedelta(minutes=CAPTURE_ADVANCE_MINUTES)
+        window_end = target_at + timedelta(minutes=max_delay_minutes)
+        if window_start <= local_now <= window_end:
+            distance = abs((local_now - target_at).total_seconds())
+            if best is None or distance < best[0]:
+                best = (distance, target_at)
+
+    if best is not None:
+        return best[1]
+
+    return local_now.replace(hour=scheduled_hour, minute=0, second=0, microsecond=0)
+
+
 def _latest_retry_at(
     window_start: datetime,
     window_end: datetime,
@@ -177,7 +200,7 @@ def collection_window(
     local_now = _as_app_datetime(local_now)
 
     if scheduled_hour is not None:
-        target_at = local_now.replace(hour=scheduled_hour, minute=0, second=0, microsecond=0)
+        target_at = _target_at_for_scheduled_hour(local_now, scheduled_hour)
         return _collection_window_for_target(target_at)
 
     target_at = _target_at_for_capture_time(local_now)

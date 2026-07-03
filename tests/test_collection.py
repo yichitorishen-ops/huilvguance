@@ -42,6 +42,15 @@ class CollectionWindowTest(unittest.TestCase):
         self.assertEqual(window.record_date, date(2026, 7, 3))
         self.assertEqual(window.time_point, "06:00")
 
+    def test_scheduled_hour_zero_before_midnight_maps_to_next_midnight_slot(self):
+        early_external_trigger = datetime(2026, 7, 3, 14, 7, tzinfo=timezone.utc)
+
+        window = collection_window(now=early_external_trigger, scheduled_hour=0)
+
+        self.assertTrue(window.should_collect)
+        self.assertEqual(window.record_date, date(2026, 7, 3))
+        self.assertEqual(window.time_point, "00:00")
+
     def test_latest_cron_datetime_finds_original_schedule_before_delayed_runtime(self):
         delayed_runtime = datetime(2026, 7, 1, 21, 13, tzinfo=timezone.utc)
 
