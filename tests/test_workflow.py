@@ -45,7 +45,9 @@ class WorkflowScheduleTest(unittest.TestCase):
         workflow = Path(".github/workflows/pages.yml").read_text(encoding="utf-8")
 
         self.assertIn("DATA_COMMITTED=true", workflow)
+        self.assertIn("actions: write", workflow)
         self.assertIn("Trigger Pages rebuild from data commit", workflow)
+        self.assertIn("curl -fsS -X POST", workflow)
         self.assertIn("/actions/workflows/pages.yml/dispatches", workflow)
         self.assertIn('"collect":"false"', workflow)
 
