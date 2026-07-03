@@ -4,8 +4,15 @@ import unittest
 
 import aiosqlite
 
+from config import compose_list
 import db
-from service import query_weekly_bond_combo, query_weekly_combo
+from service import (
+    compute_combo_lines,
+    query_weekly_amplitude,
+    query_weekly_bond_combo,
+    query_weekly_bonds,
+    query_weekly_combo,
+)
 
 
 class ServiceHistoryBaselineTest(unittest.IsolatedAsyncioTestCase):
@@ -56,6 +63,52 @@ class ServiceHistoryBaselineTest(unittest.IsolatedAsyncioTestCase):
         monday_close = logic_rows[0]["days"][1]["points"][3]["lines"]
 
         self.assertNotEqual(monday_close, ["-", "-", "-"])
+
+    async def test_currency_daily_change_uses_today_same_time_as_latest_baseline(self):
+        await self.insert_price("mcn_quotes", "2026-07-02", "13:00", "USD/CNY", 100.0)
+        await self.insert_price("mcn_quotes", "2026-07-03", "13:00", "USD/CNY", 110.0)
+        await self.insert_price("mcn_quotes", "2026-07-03", "00:00", "USD/CNY", 150.0)
+
+        rows = await query_weekly_amplitude("2026-07-03")
+        usd_cny = next(row for row in rows if row["symbol"] == "USD/CNY")
+        friday = usd_cny["days"][0]
+
+        self.assertEqual(friday["daily_price"], 110.0)
+        self.assertEqual(friday["daily_amplitude"], 0.1)
+        self.assertEqual(friday["daily_diff"], 10.0)
+
+    async def test_bond_daily_change_uses_today_same_time_as_latest_baseline(self):
+        await self.insert_price("wallstreet_bonds", "2026-07-02", "13:00", "US10YR", 4.0)
+        await self.insert_price("wallstreet_bonds", "2026-07-03", "13:00", "US10YR", 4.2)
+        await self.insert_price("wallstreet_bonds", "2026-07-03", "00:00", "US10YR", 4.8)
+
+        rows = await query_weekly_bonds("2026-07-03")
+        us10 = next(row for row in rows if row["symbol"] == "US10YR")
+        friday = us10["days"][0]
+
+        self.assertEqual(friday["daily_price"], 4.2)
+        self.assertEqual(friday["daily_amplitude"], 0.05)
+        self.assertEqual(friday["daily_diff"], 0.2)
+
+    async def test_currency_combo_daily_change_uses_today_same_time_as_latest_baseline(self):
+        for symbol, old_price, new_price, close_price in [
+            ("USD/CNY", 100.0, 110.0, 150.0),
+            ("CNY/JPY", 200.0, 220.0, 260.0),
+            ("USD/JPY", 300.0, 300.0, 360.0),
+        ]:
+            await self.insert_price("mcn_quotes", "2026-07-02", "13:00", symbol, old_price)
+            await self.insert_price("mcn_quotes", "2026-07-03", "13:00", symbol, new_price)
+            await self.insert_price("mcn_quotes", "2026-07-03", "00:00", symbol, close_price)
+
+        combos = await query_weekly_combo("2026-07-03")
+        first_combo = combos[0]
+        friday_daily = first_combo["days"][0]["daily_lines"]
+        meta_a, meta_b, meta_c, _ = compose_list[0]
+
+        self.assertEqual(
+            friday_daily,
+            compute_combo_lines(0.1, 0.1, 0.0, meta_a["name"], meta_b["name"], meta_c["name"]),
+        )
 
 
 if __name__ == "__main__":
