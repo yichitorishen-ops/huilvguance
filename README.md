@@ -16,7 +16,7 @@ Scheduled collection retries within the original Beijing-time slot hour and reco
 
 - Monday-Friday: runs every 10 minutes from 06:07 through 06:57, 13:07 through 13:57, and 18:07 through 18:57; records 06:00, 13:00, 18:00
 - Tuesday-Saturday: runs every 10 minutes from 00:07 through 00:57; records 00:00
-- Hourly at minute 08: checks whether any slot from the last 120 minutes is missing and fills it without overwriting complete data
+- Backstop at minute 08/18/28/38/48/58 every hour: checks whether any slot from the last 120 minutes is missing and fills it without overwriting complete data
 - Sunday: skipped
 - Monday 00:00: skipped
 

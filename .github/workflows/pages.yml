@@ -30,8 +30,8 @@ on:
     - cron: "37 10 * * 1-5"
     - cron: "47 10 * * 1-5"
     - cron: "57 10 * * 1-5"
-    # Hourly backstop; fills recently missed slots without overwriting complete slots.
-    - cron: "8 * * * *"
+    # Frequent backstop; fills recently missed slots without overwriting complete slots.
+    - cron: "8,18,28,38,48,58 * * * *"
   workflow_dispatch:
     inputs:
       collect:
@@ -91,9 +91,10 @@ jobs:
           run_catch_up="false"
           scheduled_hour=""
           schedule_cron=""
+          backstop_cron="8,18,28,38,48,58 * * * *"
 
           if [[ "${{ github.event_name }}" == "schedule" ]]; then
-            if [[ "${{ github.event.schedule }}" == "8 * * * *" ]]; then
+            if [[ "${{ github.event.schedule }}" == "$backstop_cron" ]]; then
               run_catch_up="true"
             else
               run_collection="true"
