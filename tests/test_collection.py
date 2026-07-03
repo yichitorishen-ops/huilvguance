@@ -5,7 +5,13 @@ import tempfile
 
 import aiosqlite
 import db
-from collection import collection_window, has_complete_slot, is_schedule_stale, latest_cron_datetime
+from collection import (
+    collection_window,
+    has_complete_slot,
+    is_schedule_stale,
+    latest_cron_datetime,
+    recent_collection_windows,
+)
 
 
 class CollectionWindowTest(unittest.TestCase):
@@ -70,6 +76,22 @@ class CollectionWindowTest(unittest.TestCase):
 
         self.assertFalse(window.should_collect)
         self.assertEqual(window.skip_reason, "sunday")
+
+    def test_recent_collection_windows_waits_until_capture_minute(self):
+        now = datetime(2026, 7, 2, 10, 8, tzinfo=timezone.utc)
+
+        windows = recent_collection_windows(now=now)
+
+        self.assertEqual(windows, [])
+
+    def test_recent_collection_windows_includes_missing_18_slot_for_backstop(self):
+        now = datetime(2026, 7, 2, 11, 8, tzinfo=timezone.utc)
+
+        windows = recent_collection_windows(now=now)
+
+        self.assertEqual(len(windows), 1)
+        self.assertEqual(windows[0].window.record_date, date(2026, 7, 2))
+        self.assertEqual(windows[0].window.time_point, "18:00")
 
 
 class SlotDataTest(unittest.IsolatedAsyncioTestCase):

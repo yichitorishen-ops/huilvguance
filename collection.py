@@ -1,9 +1,15 @@
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+import asyncio
+from datetime import date, datetime, time, timedelta, timezone
 
+from loguru import logger
 from api import Api
 from date_utils import APP_TIMEZONE
 from db import get_conn, init_db, replace_mcn_quotes, replace_wallstreet_bonds
+
+
+SCHEDULED_HOURS = (0, 6, 13, 18)
+DEFAULT_COLLECTION_MINUTE = 17
 
 
 @dataclass(frozen=True)
@@ -20,6 +26,29 @@ class CollectionResult:
     quotes_count: int = 0
     bonds_count: int = 0
     skip_reason: str | None = None
+
+
+@dataclass(frozen=True)
+class ScheduledCollection:
+    scheduled_at: datetime
+    window: CollectionWindow
+
+
+@dataclass(frozen=True)
+class ScheduledCollectionResult:
+    scheduled_at: datetime
+    result: CollectionResult
+
+
+async def _with_retries(label: str, fetcher, attempts: int = 3, delay_seconds: int = 3):
+    for attempt in range(1, attempts + 1):
+        try:
+            return await fetcher()
+        except Exception as exc:
+            if attempt == attempts:
+                raise
+            logger.warning("{} attempt {} failed: {}; retrying", label, attempt, exc)
+            await asyncio.sleep(delay_seconds)
 
 
 def _parse_cron_field(field: str, minimum: int, maximum: int):
@@ -113,6 +142,37 @@ def collection_window(
     return CollectionWindow(True, record_date, f"{hour:02d}:00")
 
 
+def recent_collection_windows(
+    now: datetime | None = None,
+    max_delay_minutes: int = 120,
+    collection_minute: int = DEFAULT_COLLECTION_MINUTE,
+) -> list[ScheduledCollection]:
+    local_now = now or datetime.now(APP_TIMEZONE)
+    if local_now.tzinfo is None:
+        local_now = local_now.replace(tzinfo=APP_TIMEZONE)
+    local_now = local_now.astimezone(APP_TIMEZONE)
+
+    earliest = local_now - timedelta(minutes=max_delay_minutes)
+    candidates = []
+    days = (local_now.date() - earliest.date()).days
+    for offset in range(days + 1):
+        candidate_date = earliest.date() + timedelta(days=offset)
+        for hour in SCHEDULED_HOURS:
+            scheduled_at = datetime.combine(
+                candidate_date,
+                time(hour, collection_minute),
+                tzinfo=APP_TIMEZONE,
+            )
+            if not earliest <= scheduled_at <= local_now:
+                continue
+
+            window = collection_window(scheduled_at=scheduled_at)
+            if window.should_collect:
+                candidates.append(ScheduledCollection(scheduled_at, window))
+
+    return sorted(candidates, key=lambda candidate: candidate.scheduled_at)
+
+
 async def collect_once(
     now: datetime | None = None,
     scheduled_hour: int | None = None,
@@ -129,10 +189,36 @@ async def collect_once(
         return CollectionResult(window=window, skip_reason="existing_slot")
 
     api = Api()
-    quotes = await api.mcn_finance_quotes()
+    quotes = await _with_retries("mcn_finance_quotes", api.mcn_finance_quotes)
     await replace_mcn_quotes(quotes, date_str, window.time_point)
 
-    bonds = await api.wallstreet_bonds(page=1, size=60)
+    bonds = await _with_retries(
+        "wallstreet_bonds",
+        lambda: api.wallstreet_bonds(page=1, size=60),
+    )
     await replace_wallstreet_bonds(bonds, date_str, window.time_point)
 
     return CollectionResult(window=window, quotes_count=len(quotes), bonds_count=len(bonds))
+
+
+async def collect_missing_recent_slots(
+    now: datetime | None = None,
+    max_delay_minutes: int = 120,
+) -> list[ScheduledCollectionResult]:
+    results = []
+    for candidate in recent_collection_windows(now=now, max_delay_minutes=max_delay_minutes):
+        window = candidate.window
+        date_str = window.record_date.strftime("%Y-%m-%d")
+        if await has_complete_slot(date_str, window.time_point):
+            results.append(
+                ScheduledCollectionResult(
+                    scheduled_at=candidate.scheduled_at,
+                    result=CollectionResult(window=window, skip_reason="existing_slot"),
+                )
+            )
+            continue
+
+        result = await collect_once(scheduled_at=candidate.scheduled_at, skip_existing=True)
+        results.append(ScheduledCollectionResult(candidate.scheduled_at, result))
+
+    return results
