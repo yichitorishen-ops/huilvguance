@@ -112,37 +112,27 @@ async def _latest_prices_on_or_before(conn, table_name: str, symbols: list, date
     return {symbol: point["price"] for symbol, point in latest_points.items()}
 
 
-def _latest_point_from_lookup_on_or_before(lookup: dict, symbol: str, date_str: str):
-    latest = None
-    for (row_symbol, row_date, time_point), price in lookup.items():
-        if row_symbol != symbol or row_date > date_str:
-            continue
-        sort_key = (row_date, _time_rank(time_point))
-        if latest is None or sort_key > latest[0]:
-            latest = (
-                sort_key,
-                {
-                    "date": row_date,
-                    "time": time_point,
-                    "price": price,
-                },
-            )
-    return latest[1] if latest else None
+def _has_symbol_rows_on_date(lookup: dict, symbol: str, date_str: str):
+    return any(row_symbol == symbol and row_date == date_str for row_symbol, row_date, _ in lookup)
 
 
 def _daily_comparison_prices(lookup: dict, prior_points: dict, symbol: str, day_str: str, baseline_date_str: str):
-    baseline_point = _latest_point_from_lookup_on_or_before(lookup, symbol, baseline_date_str)
-    prior_point = prior_points.get(symbol)
-    if prior_point is not None:
-        prior_key = (prior_point["date"], _time_rank(prior_point["time"]))
-        if baseline_point is None or prior_key > (baseline_point["date"], _time_rank(baseline_point["time"])):
-            baseline_point = prior_point
+    has_baseline_date = _has_symbol_rows_on_date(lookup, symbol, baseline_date_str)
+    for time_point in sorted(TIME_POINTS, key=_time_rank, reverse=True):
+        today_price = lookup.get((symbol, day_str, time_point))
+        if today_price is None:
+            continue
 
-    if baseline_point is None:
-        return None, None, None
+        baseline_price = lookup.get((symbol, baseline_date_str, time_point))
+        if baseline_price is None and not has_baseline_date:
+            prior_point = prior_points.get(symbol)
+            if prior_point is not None and prior_point["time"] == time_point:
+                baseline_price = prior_point["price"]
 
-    today_price = lookup.get((symbol, day_str, baseline_point["time"]))
-    return today_price, baseline_point["price"], baseline_point["time"]
+        if baseline_price is not None:
+            return today_price, baseline_price, time_point
+
+    return None, None, None
 
 async def _query_weekly_data(friday_date_str: str, table_name: str, symbol_map: dict):
     timeline = get_week_timeline(friday_date_str)

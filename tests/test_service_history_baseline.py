@@ -77,6 +77,19 @@ class ServiceHistoryBaselineTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(friday["daily_amplitude"], 0.1)
         self.assertEqual(friday["daily_diff"], 10.0)
 
+    async def test_currency_daily_change_uses_latest_today_time_when_today_close_is_missing(self):
+        await self.insert_price("mcn_quotes", "2026-07-01", "13:00", "USD/CNY", 100.0)
+        await self.insert_price("mcn_quotes", "2026-07-01", "00:00", "USD/CNY", 200.0)
+        await self.insert_price("mcn_quotes", "2026-07-02", "13:00", "USD/CNY", 110.0)
+
+        rows = await query_weekly_amplitude("2026-06-26")
+        usd_cny = next(row for row in rows if row["symbol"] == "USD/CNY")
+        thursday = usd_cny["days"][4]
+
+        self.assertEqual(thursday["daily_price"], 110.0)
+        self.assertEqual(thursday["daily_amplitude"], 0.1)
+        self.assertEqual(thursday["daily_diff"], 10.0)
+
     async def test_bond_daily_change_uses_today_same_time_as_latest_baseline(self):
         await self.insert_price("wallstreet_bonds", "2026-07-02", "13:00", "US10YR", 4.0)
         await self.insert_price("wallstreet_bonds", "2026-07-03", "13:00", "US10YR", 4.2)
@@ -89,6 +102,19 @@ class ServiceHistoryBaselineTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(friday["daily_price"], 4.2)
         self.assertEqual(friday["daily_amplitude"], 0.05)
         self.assertEqual(friday["daily_diff"], 0.2)
+
+    async def test_bond_daily_change_uses_latest_today_time_when_today_close_is_missing(self):
+        await self.insert_price("wallstreet_bonds", "2026-07-01", "13:00", "US10YR", 4.0)
+        await self.insert_price("wallstreet_bonds", "2026-07-01", "00:00", "US10YR", 5.0)
+        await self.insert_price("wallstreet_bonds", "2026-07-02", "13:00", "US10YR", 4.2)
+
+        rows = await query_weekly_bonds("2026-06-26")
+        us10 = next(row for row in rows if row["symbol"] == "US10YR")
+        thursday = us10["days"][4]
+
+        self.assertEqual(thursday["daily_price"], 4.2)
+        self.assertEqual(thursday["daily_amplitude"], 0.05)
+        self.assertEqual(thursday["daily_diff"], 0.2)
 
     async def test_currency_combo_daily_change_uses_today_same_time_as_latest_baseline(self):
         for symbol, old_price, new_price, close_price in [
