@@ -41,6 +41,14 @@ class WorkflowScheduleTest(unittest.TestCase):
         self.assertIn('== "$backstop_cron"', workflow)
         self.assertIn('run_catch_up="true"', workflow)
 
+    def test_data_commit_triggers_build_only_refresh(self):
+        workflow = Path(".github/workflows/pages.yml").read_text(encoding="utf-8")
+
+        self.assertIn("DATA_COMMITTED=true", workflow)
+        self.assertIn("Trigger Pages rebuild from data commit", workflow)
+        self.assertIn("/actions/workflows/pages.yml/dispatches", workflow)
+        self.assertIn('"collect":"false"', workflow)
+
 
 if __name__ == "__main__":
     unittest.main()
