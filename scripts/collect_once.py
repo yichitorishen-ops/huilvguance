@@ -51,7 +51,7 @@ async def main():
     result = await collect_once(
         scheduled_hour=args.scheduled_hour,
         scheduled_at=scheduled_at,
-        skip_existing=scheduled_at is not None,
+        skip_existing=scheduled_at is not None or args.scheduled_hour is not None,
     )
     window = result.window
     if not window.should_collect:

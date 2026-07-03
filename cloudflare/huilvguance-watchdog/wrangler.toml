@@ -1,0 +1,8 @@
+name = "huilvguance-watchdog"
+main = "src/index.js"
+compatibility_date = "2025-12-01"
+account_id = "da5447a259dab3a8964ef0b06c91f2c3"
+workers_dev = true
+
+[triggers]
+crons = ["7,17,27,37,47,57 * * * *"]
