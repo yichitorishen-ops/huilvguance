@@ -10,6 +10,7 @@ from db import get_conn, init_db, replace_mcn_quotes, replace_wallstreet_bonds
 
 SCHEDULED_HOURS = (0, 6, 13, 18)
 DEFAULT_COLLECTION_MINUTE = 17
+COLLECTION_RETRY_MINUTES = (7, 17, 27, 37, 47, 57)
 
 
 @dataclass(frozen=True)
@@ -145,7 +146,7 @@ def collection_window(
 def recent_collection_windows(
     now: datetime | None = None,
     max_delay_minutes: int = 120,
-    collection_minute: int = DEFAULT_COLLECTION_MINUTE,
+    collection_minute: int | None = None,
 ) -> list[ScheduledCollection]:
     local_now = now or datetime.now(APP_TIMEZONE)
     if local_now.tzinfo is None:
@@ -153,24 +154,31 @@ def recent_collection_windows(
     local_now = local_now.astimezone(APP_TIMEZONE)
 
     earliest = local_now - timedelta(minutes=max_delay_minutes)
-    candidates = []
+    collection_minutes = (collection_minute,) if collection_minute is not None else COLLECTION_RETRY_MINUTES
+    candidates_by_slot = {}
     days = (local_now.date() - earliest.date()).days
     for offset in range(days + 1):
         candidate_date = earliest.date() + timedelta(days=offset)
         for hour in SCHEDULED_HOURS:
-            scheduled_at = datetime.combine(
-                candidate_date,
-                time(hour, collection_minute),
-                tzinfo=APP_TIMEZONE,
-            )
-            if not earliest <= scheduled_at <= local_now:
-                continue
+            for minute in collection_minutes:
+                scheduled_at = datetime.combine(
+                    candidate_date,
+                    time(hour, minute),
+                    tzinfo=APP_TIMEZONE,
+                )
+                if not earliest <= scheduled_at <= local_now:
+                    continue
 
-            window = collection_window(scheduled_at=scheduled_at)
-            if window.should_collect:
-                candidates.append(ScheduledCollection(scheduled_at, window))
+                window = collection_window(scheduled_at=scheduled_at)
+                if not window.should_collect:
+                    continue
 
-    return sorted(candidates, key=lambda candidate: candidate.scheduled_at)
+                slot_key = (window.record_date, window.time_point)
+                current = candidates_by_slot.get(slot_key)
+                if current is None or scheduled_at > current.scheduled_at:
+                    candidates_by_slot[slot_key] = ScheduledCollection(scheduled_at, window)
+
+    return sorted(candidates_by_slot.values(), key=lambda candidate: candidate.scheduled_at)
 
 
 async def collect_once(

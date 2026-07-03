@@ -78,7 +78,7 @@ class CollectionWindowTest(unittest.TestCase):
         self.assertEqual(window.skip_reason, "sunday")
 
     def test_recent_collection_windows_waits_until_capture_minute(self):
-        now = datetime(2026, 7, 2, 10, 8, tzinfo=timezone.utc)
+        now = datetime(2026, 7, 2, 10, 6, tzinfo=timezone.utc)
 
         windows = recent_collection_windows(now=now)
 
@@ -92,6 +92,17 @@ class CollectionWindowTest(unittest.TestCase):
         self.assertEqual(len(windows), 1)
         self.assertEqual(windows[0].window.record_date, date(2026, 7, 2))
         self.assertEqual(windows[0].window.time_point, "18:00")
+
+    def test_recent_collection_windows_uses_late_retry_minutes_for_backstop(self):
+        now = datetime(2026, 7, 3, 0, 32, tzinfo=timezone.utc)
+
+        windows = recent_collection_windows(now=now)
+
+        self.assertEqual(len(windows), 1)
+        self.assertEqual(windows[0].scheduled_at.hour, 6)
+        self.assertEqual(windows[0].scheduled_at.minute, 57)
+        self.assertEqual(windows[0].window.record_date, date(2026, 7, 3))
+        self.assertEqual(windows[0].window.time_point, "06:00")
 
 
 class SlotDataTest(unittest.IsolatedAsyncioTestCase):
