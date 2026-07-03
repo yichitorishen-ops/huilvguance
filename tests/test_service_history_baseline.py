@@ -1,6 +1,8 @@
 import os
 import tempfile
 import unittest
+from datetime import date
+from unittest.mock import patch
 
 import aiosqlite
 
@@ -90,6 +92,30 @@ class ServiceHistoryBaselineTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(thursday["daily_amplitude"], 0.1)
         self.assertEqual(thursday["daily_diff"], 10.0)
 
+    async def test_currency_weekly_summary_uses_first_and_last_valid_points_after_week_close(self):
+        await self.insert_price("mcn_quotes", "2026-06-29", "13:00", "USD/CNY", 100.0)
+        await self.insert_price("mcn_quotes", "2026-07-02", "13:00", "USD/CNY", 110.0)
+
+        with patch("service.current_app_date", return_value=date(2026, 7, 4), create=True):
+            rows = await query_weekly_amplitude("2026-06-26")
+        usd_cny = next(row for row in rows if row["symbol"] == "USD/CNY")
+
+        self.assertEqual(usd_cny["weekly_price"], 110.0)
+        self.assertEqual(usd_cny["weekly_amplitude"], 0.1)
+        self.assertEqual(usd_cny["weekly_diff"], 10.0)
+
+    async def test_weekly_summary_waits_until_final_day_has_passed(self):
+        await self.insert_price("mcn_quotes", "2026-07-03", "06:00", "USD/CNY", 100.0)
+        await self.insert_price("mcn_quotes", "2026-07-09", "00:00", "USD/CNY", 110.0)
+
+        with patch("service.current_app_date", return_value=date(2026, 7, 4), create=True):
+            rows = await query_weekly_amplitude("2026-07-03")
+        usd_cny = next(row for row in rows if row["symbol"] == "USD/CNY")
+
+        self.assertEqual(usd_cny["weekly_price"], "")
+        self.assertEqual(usd_cny["weekly_amplitude"], "")
+        self.assertEqual(usd_cny["weekly_diff"], "")
+
     async def test_bond_daily_change_uses_today_same_time_as_latest_baseline(self):
         await self.insert_price("wallstreet_bonds", "2026-07-02", "13:00", "US10YR", 4.0)
         await self.insert_price("wallstreet_bonds", "2026-07-03", "13:00", "US10YR", 4.2)
@@ -133,6 +159,25 @@ class ServiceHistoryBaselineTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             friday_daily,
+            compute_combo_lines(0.1, 0.1, 0.0, meta_a["name"], meta_b["name"], meta_c["name"]),
+        )
+
+    async def test_currency_combo_weekly_summary_uses_first_and_last_valid_points_after_week_close(self):
+        for symbol, first_price, last_price in [
+            ("USD/CNY", 100.0, 110.0),
+            ("CNY/JPY", 200.0, 220.0),
+            ("USD/JPY", 300.0, 300.0),
+        ]:
+            await self.insert_price("mcn_quotes", "2026-06-29", "13:00", symbol, first_price)
+            await self.insert_price("mcn_quotes", "2026-07-02", "13:00", symbol, last_price)
+
+        with patch("service.current_app_date", return_value=date(2026, 7, 4), create=True):
+            combos = await query_weekly_combo("2026-06-26")
+        first_combo = combos[0]
+        meta_a, meta_b, meta_c, _ = compose_list[0]
+
+        self.assertEqual(
+            first_combo["weekly_lines"],
             compute_combo_lines(0.1, 0.1, 0.0, meta_a["name"], meta_b["name"], meta_c["name"]),
         )
 
